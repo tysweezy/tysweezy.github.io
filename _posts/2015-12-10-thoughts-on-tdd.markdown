@@ -3,6 +3,8 @@ layout: post
 title:  "Quick Thoughts on Test-Driven Development and Design Patterns"
 date:   2015-12-10 22:55:17 -0700
 categories: tdd rant
+author: Tyler Souza
+share: true
 ---
 
 As a developer, a lot of times I feel constantly worried that I’m doing the “wrong thing” when I’m writing code. I worry if I’m doing “x” correctly, while I’m trying to focus on “y” thing. This mostly occurs for me when terms such as “[test-driven development][1]” and “[design patterns][2]” get thrown around. I usually catch myself worrying about these topics at the wrong times; especially when I’m just trying to write something simple and get the product out here in the wild. Here are my personal thoughts and advice when approaching these topics.

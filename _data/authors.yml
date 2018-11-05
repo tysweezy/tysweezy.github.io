@@ -1,0 +1,15 @@
+Tyler Souza:
+  name: Tyler Souza
+  picture: assets/images/dawey.jpg
+  twitter: "@tysweezy"
+  github: "tysweezy"
+  links:
+    - title: Twittter
+      url: https://twitter.com/tysweezy
+      icon: fab fa-twitter-square
+    - title: Github
+      url: https://github.com/tysweezy
+      icon: fab fa-github-square
+    - title: LinkedIn
+      url: https://www.linkedin.com/in/tyler-souza/
+      icon: fab fa-linkedin

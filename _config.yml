@@ -22,9 +22,11 @@ url: "http://tylersouza.com" # the base hostname & protocol for your site, e.g. 
 twitter_username: tysweezy
 github_username:  tysweezy
 
+favicon: /assets/favicon.png
+
 # Build settings
 markdown: kramdown
-theme: minima
+theme: jekyll-theme-so-simple
 plugins:
   - jekyll-feed
 

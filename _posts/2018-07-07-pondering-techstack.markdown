@@ -2,7 +2,9 @@
 layout: post
 title:  "Pondering About My Main Backend Techstack of Choice"
 date:   2018-07-07 22:55:17 -0700
-categories: javascript techstak
+categories: javascript techstack
+author: Tyler Souza
+share: true
 ---
 For about eight months or so, I decided to commit myself and focus on Node.js as my main backend techstack of choice. PHP/Laravel have treated me well and I've been loving Go, but I wanted to focus on one tech stack, which is now Node as my main go-to. There's just something about Javascript that I can't get away from. Maybe it's the new features coming out, it's functional programming nature and it's flexibility. Who knows.
 

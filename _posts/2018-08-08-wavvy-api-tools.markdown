@@ -3,9 +3,9 @@ layout: post
 title:  "Part 1: Wavvy, My Open Source Project Idea. Providing REST API Helpers and Syntactic Sugar"
 date:   2018-08-08 17:55:17 -0700
 categories: python opensource api
+author: Tyler Souza
+share: true
 ---
-
-# Hello Idea!
 
 I've decided to start an open source project and fill another repository on my GitHub. Since I've been working more on the backend side and building services/REST APIs, I've had an urge to dedicate myself in this area. I thought it would a wonderful area to provide tooling for REST API development in Python.
 
