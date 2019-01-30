@@ -54,7 +54,7 @@ I also typically use [Laravel](https://laravel.com/) as my API backend sometimes
 However, it typically doesn’t matter what stack I’m in. I can work with [Go](https://golang.org/) or [Django/Python](https://www.djangoproject.com/) backend. I can hang out with [React](https://reactjs.org/), [Angular](https://angular.io/) and friends. I just stick to the overall concept. 
 
 ## Closing Points
-I personally think that separating your stack is a smart idea. It just makes sense to me. For scalability reasons, for development reasons, etc. I think it’s a great pattern to follow for most use-cases. Though, it may not fit every use-case. Which brings me to my last point, at then end-of-the-day, it really depends on the cards you’re handed with and the problem you are trying to solve. 
+I personally think that separating your stack is a smart idea. It just makes sense to me. For scalability reasons, for development reasons, etc. I think it’s a great pattern to follow for most use-cases. Though, it may not fit every use-case. Which brings me to my last point, at the end-of-the-day, it really depends on the cards you’re handed with and the problem you are trying to solve. 
 
 _I don’t have a comment section. However you can come chat with me on [Twitter](https://twitter.com/tysweezy)!_
 
