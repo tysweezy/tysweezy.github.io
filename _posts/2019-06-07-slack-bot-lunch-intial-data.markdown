@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Creating a Lunch Group Slack Bot: Working with Some Data"
+title:  "Slack Bot Idea: Working with Some Data with Python"
 date:   2019-06-07  15:02:17 -0700
 categories: software engineering python
 author: Tyler Souza
