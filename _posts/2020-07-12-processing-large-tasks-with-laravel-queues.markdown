@@ -90,25 +90,25 @@ class DeadlineService
 Within that service class, I have a `activateClientDeadline` method that actually dispatches as `ProcessDeadline` within an foreach loop. Which has a delay of 10 seconds for each deadline.
 
 ```
-    <?php>
+<?php
 
-    // ...
+// ...
 
-    /**
-     * Activates deadlines on client creation.
-     * or activates when client is re-activated.
-     *
-     * @return void
-     */
-    public function activateClientDeadlines()
-    {
-        // loop through pendingDeadlines array
-        foreach($this->preparedDeadlines as $pd) {
-            // dispatch jobs instead
-            ProcessDeadline::dispatch($this->client, $pd)
-                ->delay(now()->addSeconds());
-        }
+/**
+    * Activates deadlines on client creation.
+    * or activates when client is re-activated.
+    *
+    * @return void
+    */
+public function activateClientDeadlines()
+{
+    // loop through pendingDeadlines array
+    foreach($this->preparedDeadlines as $pd) {
+        // dispatch jobs instead
+        ProcessDeadline::dispatch($this->client, $pd)
+            ->delay(now()->addSeconds(10));
     }
+}
 ``` 
 
 Note, I could’ve had this in the controller, but it made since to have this in a service class, since I’ve already been using it to handle deadlines and deadline data in the system. 
@@ -116,9 +116,11 @@ Note, I could’ve had this in the controller, but it made since to have this in
 Next, we can call are activate method in the deadline service in our store method in the `ClientController`.
 
 ```
-    <?php
+<?php
 
-    // ... 
+class ClientController extends Controller 
+{
+// ... 
 
     public function store(Request $request)
     {
@@ -144,6 +146,8 @@ Next, we can call are activate method in the deadline service in our store metho
 
         return redirect()->route('clients')->withInput()->with('New client saved');
     }
+
+}
 ```
 
 And boom!  Simple enough! We are now processing jobs in the background. 
