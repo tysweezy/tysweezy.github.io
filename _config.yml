@@ -25,12 +25,8 @@ github_username:  tysweezy
 favicon: /assets/favicon.png
 
 # Build settings
-<<<<<<< HEAD
 # theme: jekyll-theme-so-simple
 theme: no-style-please
-=======
-theme: jekyll-theme-cayman
->>>>>>> 0130243f71b82f176c5b48f37a37f4d5860eaa00
 plugins:
   - jekyll-feed
 
