@@ -26,7 +26,8 @@ favicon: /assets/favicon.png
 
 # Build settings
 markdown: kramdown
-theme: jekyll-theme-so-simple
+# theme: jekyll-theme-so-simple
+remote_theme: "mmistakes/so-simple-theme@3.2.0"
 # theme: no-style-please
 plugins:
   - jekyll-feed
