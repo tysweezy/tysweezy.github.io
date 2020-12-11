@@ -1,0 +1,727 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="3.8.7">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2020-12-10T17:53:25-08:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">Tyler Souza</title><subtitle>Just my peronsal software engineering blog</subtitle><entry><title type="html">Processing Large Tasks with Laravel Queues</title><link href="http://localhost:4000/software/engineering/2020/07/12/processing-large-tasks-with-laravel-queues.html" rel="alternate" type="text/html" title="Processing Large Tasks with Laravel Queues" /><published>2020-07-12T11:37:17-07:00</published><updated>2020-07-12T11:37:17-07:00</updated><id>http://localhost:4000/software/engineering/2020/07/12/processing-large-tasks-with-laravel-queues</id><content type="html" xml:base="http://localhost:4000/software/engineering/2020/07/12/processing-large-tasks-with-laravel-queues.html">&lt;p&gt;Recently, I tackled an interesting problem with an app I’m building.  Just for context and without going into too much detail, this system is a management admin for guidance counselors to help manage their patients who are students in High School. I had to build a feature that generated five surveys with incrementing deadlines every time a new client was entered into the system. Easy enough right? Well, every survey generated a number of questions and categories per survey. This could mean hundreds of questions could be created at one time, thus slowing down the response time since everything would be running synchronously and waiting for all of the insert queries to complete. It was obvious that I couldn’t just create those records right in the controller, I had to process those tasks in the background.&lt;/p&gt;
+
+&lt;h2 id=&quot;laravel-queues-to-the-rescue&quot;&gt;Laravel Queues to the Rescue!&lt;/h2&gt;
+&lt;p&gt;I’ve been building this app using &lt;a href=&quot;https://laravel.com/&quot;&gt;Laravel&lt;/a&gt; for a couple of years and it’s been pretty stable in production. I’ve gotta say, I’m pretty happy with it. the past, I’ve used &lt;a href=&quot;https://github.com/celery/celery&quot;&gt;Celery&lt;/a&gt;, which is a a job queue in Python or something like &lt;a href=&quot;https://moove-it.github.io/sidekiq-scheduler/&quot;&gt;Sidekiq&lt;/a&gt; to process tasks in the background. I’ve even setup a simple job queue in Go. However, I’ve never had the opportunity to use Laravel’s queue system.&lt;/p&gt;
+
+&lt;p&gt;It was actually the easiest tool I’ve ever has to setup! One of the many reasons why I love Laravel as a framework. Let’s go over my solution to the survey problem and then in end go over setup.&lt;/p&gt;
+
+&lt;p&gt;First I created a queue called &lt;code class=&quot;highlighter-rouge&quot;&gt;ProcessDeadline&lt;/code&gt;.  I passed injected the &lt;code class=&quot;highlighter-rouge&quot;&gt;Client&lt;/code&gt; model and passed in an array (which will hold data for our deadline) in the constructor. Then in the &lt;code class=&quot;highlighter-rouge&quot;&gt;handle()&lt;/code&gt; method, I created a new instance to my &lt;code class=&quot;highlighter-rouge&quot;&gt;SurveyFactory&lt;/code&gt;  classand called &lt;code class=&quot;highlighter-rouge&quot;&gt;generateSurveyDeadline&lt;/code&gt; that will be called everything the &lt;code class=&quot;highlighter-rouge&quot;&gt;dispatch()&lt;/code&gt; method is fired somewhere in the code base; in our case it will be in the &lt;code class=&quot;highlighter-rouge&quot;&gt;ClientController&lt;/code&gt;. SurveyFactory handles the creation of a survey.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;cp&quot;&gt;&amp;lt;?php&lt;/span&gt;
+
+&lt;span class=&quot;kn&quot;&gt;namespace&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;App\Jobs&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;App\Client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;App\Components\Survey\SurveyFactory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Illuminate\Bus\Queueable&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Illuminate\Queue\SerializesModels&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Illuminate\Queue\InteractsWithQueue&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Illuminate\Contracts\Queue\ShouldQueue&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Illuminate\Foundation\Bus\Dispatchable&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;ProcessDeadline&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;implements&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;ShouldQueue&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;kn&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;Dispatchable&lt;/span&gt;&lt;span class=&quot;err&quot;&gt;, InteractsWithQueue, Queueable, SerializesModels&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+    &lt;span class=&quot;k&quot;&gt;protected&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$preparedDeadline&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+    &lt;span class=&quot;cd&quot;&gt;/**
+     * Create a new job instance.
+     *
+     * @return void
+     */&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;__construct&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;Client&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;array&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$preparedDeadline&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;preparedDeadline&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$preparedDeadline&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;cd&quot;&gt;/**
+     * Execute the job.
+     *
+     * @return void
+     */&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;handle&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+
+        &lt;span class=&quot;nv&quot;&gt;$surveyFactory&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;SurveyFactory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;();&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$surveyFactory&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;generateSurveyDeadline&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;preparedDeadline&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;I have a &lt;code class=&quot;highlighter-rouge&quot;&gt;DeadlineService&lt;/code&gt; that is purposely coupled to a &lt;code class=&quot;highlighter-rouge&quot;&gt;Client&lt;/code&gt; model. I created a &lt;code class=&quot;highlighter-rouge&quot;&gt;preparedDeadlines&lt;/code&gt; array in the constructor.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;cp&quot;&gt;&amp;lt;?php&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;// ....&lt;/span&gt;
+
+&lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;DeadlineService&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;__construct&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;Client&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;   
+        &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;preparedDeadlines&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;
+            &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;
+                &lt;span class=&quot;s1&quot;&gt;'section'&lt;/span&gt;       &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'Intake'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; 
+                &lt;span class=&quot;s1&quot;&gt;'counselor_id'&lt;/span&gt;  &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;counselor_id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                &lt;span class=&quot;s1&quot;&gt;'survey_type'&lt;/span&gt;   &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'caloms-juvenile-intake'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                &lt;span class=&quot;s1&quot;&gt;'deadline'&lt;/span&gt;      &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;self&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;INIT_INTAKE_DEADLINE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                &lt;span class=&quot;s1&quot;&gt;'intake_date'&lt;/span&gt;   &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;intake_date&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+                &lt;span class=&quot;s1&quot;&gt;'client_id'&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;id&lt;/span&gt;     
+            &lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
+			&lt;span class=&quot;c1&quot;&gt;// ... shortened for brevity...&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Within that service class, I have a &lt;code class=&quot;highlighter-rouge&quot;&gt;activateClientDeadline&lt;/code&gt; method that actually dispatches as &lt;code class=&quot;highlighter-rouge&quot;&gt;ProcessDeadline&lt;/code&gt; within an foreach loop. Which has a delay of 10 seconds for each deadline.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;cp&quot;&gt;&amp;lt;?php&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;// ...&lt;/span&gt;
+
+&lt;span class=&quot;cd&quot;&gt;/**
+    * Activates deadlines on client creation.
+    * or activates when client is re-activated.
+    *
+    * @return void
+    */&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;activateClientDeadlines&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// loop through pendingDeadlines array&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;foreach&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;preparedDeadlines&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;as&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$pd&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;c1&quot;&gt;// dispatch jobs instead&lt;/span&gt;
+        &lt;span class=&quot;nx&quot;&gt;ProcessDeadline&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dispatch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$pd&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+            &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;delay&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;now&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;addSeconds&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;10&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;));&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Note, I could’ve had this in the controller, but it made since to have this in a service class, since I’ve already been using it to handle deadlines and deadline data in the system.&lt;/p&gt;
+
+&lt;p&gt;Next, we can call are activate method in the deadline service in our store method in the &lt;code class=&quot;highlighter-rouge&quot;&gt;ClientController&lt;/code&gt;.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;cp&quot;&gt;&amp;lt;?php&lt;/span&gt;
+
+&lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;ClientController&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;extends&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;Controller&lt;/span&gt; 
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;c1&quot;&gt;// ... &lt;/span&gt;
+
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;Request&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$request&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        
+        &lt;span class=&quot;nv&quot;&gt;$validatedData&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nv&quot;&gt;$request&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;validate&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;([&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'first_name'&lt;/span&gt;    &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'last_name'&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'email'&lt;/span&gt;         &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required|email'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'phone'&lt;/span&gt;         &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'age'&lt;/span&gt;           &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'birth_date'&lt;/span&gt;    &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'client_id'&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'counselor_id'&lt;/span&gt;  &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+            &lt;span class=&quot;s1&quot;&gt;'intake_date'&lt;/span&gt;   &lt;span class=&quot;o&quot;&gt;=&amp;gt;&lt;/span&gt; &lt;span class=&quot;s1&quot;&gt;'required|date'&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;]);&lt;/span&gt;
+
+        &lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;Client&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;create&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$request&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;all&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;());&lt;/span&gt;
+
+        &lt;span class=&quot;c1&quot;&gt;// create deadlines for new client&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$deadlineService&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;DeadlineService&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+        &lt;span class=&quot;nv&quot;&gt;$deadlineService&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;activateClientDeadlines&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;();&lt;/span&gt;
+
+
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;redirect&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;route&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s1&quot;&gt;'clients'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;withInput&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;with&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s1&quot;&gt;'New client saved'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;And boom!  Simple enough! We are now processing jobs in the background.&lt;/p&gt;
+
+&lt;h2 id=&quot;server-setup&quot;&gt;Server Setup&lt;/h2&gt;
+&lt;p&gt;Server setup was also extremely easy! Laravel docs really are great: &lt;a href=&quot;https://laravel.com/docs/7.x/queues&quot;&gt;Queues - Laravel - The PHP Framework For Web Artisans&lt;/a&gt;. First Laravel requires to setup migrations that will create jobs table in the database what will hold jobs (also failed jobs). So I had to set that up.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;php artisan queue:table
+
+php artisan migrate
+
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;I used Redis as my queue driver. Setup as a running process through systemd on my Ubuntu VPS instance.&lt;/p&gt;
+
+&lt;p&gt;Next, I configured supervisor to keep &lt;code class=&quot;highlighter-rouge&quot;&gt;queue:work&lt;/code&gt; running on my server and to restart the process if it fails. Installed via apt-get &lt;code class=&quot;highlighter-rouge&quot;&gt;sudo apt-get install supervisor&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Then setup my &lt;code class=&quot;highlighter-rouge&quot;&gt;app-worker.conf&lt;/code&gt; config file in &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/supervisor/conf.d&lt;/code&gt;.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;[program:app-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /home/apps/app.com/artisan queue:work redis --sleep=3 --tries=3
+autostart=true
+autorestart=true
+user=tyler
+numprocs=8
+redirect_stderr=true
+stdout_logfile=/home/apps/app.com/worker.log
+stopwaitsecs=3600
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Then update the supervisor config and start the process.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;sudo supervisorctl reread
+
+sudo supervisorctl update
+
+sudo supervisorctl start app-worker:*
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;We all set now! When creating a new Client, the response time is instant, while those surveys get processed in the background. Super easy!&lt;/p&gt;
+
+&lt;p&gt;Also a thing to note, I running this app in a cheap DigitalOcean VM server with 1 CPU core and 1GB of RAM. This queue setup barely takes up any resources when processing, which is nice. I should setup some benchmarks on this!&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">Recently, I tackled an interesting problem with an app I’m building. Just for context and without going into too much detail, this system is a management admin for guidance counselors to help manage their patients who are students in High School. I had to build a feature that generated five surveys with incrementing deadlines every time a new client was entered into the system. Easy enough right? Well, every survey generated a number of questions and categories per survey. This could mean hundreds of questions could be created at one time, thus slowing down the response time since everything would be running synchronously and waiting for all of the insert queries to complete. It was obvious that I couldn’t just create those records right in the controller, I had to process those tasks in the background.</summary></entry><entry><title type="html">So I Want to Learn How to Build a Compiler</title><link href="http://localhost:4000/software/engineering/languages/2020/05/10/so-i-want-to-learn-how-to-build-a-compiler.html" rel="alternate" type="text/html" title="So I Want to Learn How to Build a Compiler" /><published>2020-05-10T14:14:17-07:00</published><updated>2020-05-10T14:14:17-07:00</updated><id>http://localhost:4000/software/engineering/languages/2020/05/10/so-i-want-to-learn-how-to-build-a-compiler</id><content type="html" xml:base="http://localhost:4000/software/engineering/languages/2020/05/10/so-i-want-to-learn-how-to-build-a-compiler.html">&lt;p&gt;I love learning and talking about programming languages. Mostly enjoy a different way of thinking that comes with it. Bring up Haskell? We’ll talk about Monads and functional programming. Clojure? Let’s talk about transducers. Bringing up Go? Let’s talk about go routines, concurrency and striving for simplicity.&lt;/p&gt;
+
+&lt;h2 id=&quot;why-would-i-want-to-build-a-compiler-thats-crazy&quot;&gt;Why Would I Want to Build a Compiler? That’s Crazy?&lt;/h2&gt;
+&lt;p&gt;There are couple of reasons why I want to build one:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;It’s an interesting topic that piques my interest.&lt;/li&gt;
+  &lt;li&gt;I want to build a language for ME. I want to build a language that I strive for simplicity, a language that I enjoy and one that can solve the problems that I have.&lt;/li&gt;
+  &lt;li&gt;I want to learn something new. I enjoy the topic and want to dive in.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;So what got me inspired? Well, one reason is talking to my colleagues about different languages and how they solve different problems. I always love a great conversation about languages or a specific one rather.&lt;/p&gt;
+
+&lt;p&gt;Secondly, with all of this COVID-19 stuff going at the moment, I think it’s good to delve into my hobbies and start a good fun project. I’ve been hunting for a side-project to work on.&lt;/p&gt;
+
+&lt;p&gt;Also, I tend to follow Johnathan Blow a lot in regards to language design. Definitely an inspiration in this topic. Especially when he discusses parsers in this stream.&lt;/p&gt;
+
+&lt;iframe width=&quot;560&quot; height=&quot;315&quot; src=&quot;https://www.youtube.com/embed/MnctEW1oL-E&quot; frameborder=&quot;0&quot; allow=&quot;accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture&quot; allowfullscreen=&quot;&quot;&gt;&lt;/iframe&gt;
+
+&lt;h2 id=&quot;my-idea-for-a-language&quot;&gt;My Idea For a Language&lt;/h2&gt;
+&lt;p&gt;Since this is a learning experience for me, I want to keep things simple. My idea for this language in mind is a functional based language with a C-styled syntax.&lt;/p&gt;
+
+&lt;p&gt;Also, for the implementation language, I’ll probably use Python since it will be faster for me to iterate and come up with a prototype. I can probably switch over to C/C++ or Go if performance is a concern. However, depends on the goals as things develop.&lt;/p&gt;
+
+&lt;p&gt;Also looking around, maybe a tool like PLY might be helpful for a first language. &lt;a href=&quot;http://www.dabeaz.com/ply/&quot;&gt;PLY (Python Lex-Yacc)&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Though, first start is to learn about parsers, lexers, tokens, etc.&lt;/p&gt;
+
+&lt;h2 id=&quot;rough-idea-of-the-language-i-want-to-build&quot;&gt;Rough Idea of the Language I Want to Build&lt;/h2&gt;
+&lt;p&gt;Here’s a rough idea of the language I want to build. I don’t have a name for it yet, but this the basic idea.&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;// primatives
+str, bool, int, float
+
+// you can create your own types
+
+// constant variables. Always immutable
+let foo = value
+
+// maybe strongly typed?
+let foo = int: 32
+let bar = str: &quot;some string&quot;
+let baz = bool: true
+
+// type inference
+let foo := &quot;some value&quot;
+let bar := 32
+let baz := true
+
+// lists
+[1, 3, 4]
+
+// hash maps or dictionaries
+{ key: value }
+
+// you can create your own types
+type Square = Float :: Float :: Float :: Float
+
+// one example of a method.
+fn filter_list(arg1, arg2) -&amp;gt;
+  return arg1.filter(value) 
+    |&amp;gt; arg2.add(value)
+    |&amp;gt; foo(bar)
+  
+
+// inline return function
+fn filter_foo() -&amp;gt; map(list, fn)
+
+// function with types
+fn foo(arg1: string, arg2: int) -&amp;gt; 
+  // logic
+
+// conditions
+if -&amp;gt; then
+
+// control flow 
+
+// should there be a concept of loops? Especially since ther will be a 
+// heavy focus on functional programming? espcially focus on higher-order
+// functions such as map, filter, reduce, etc.  
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h2 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h2&gt;
+&lt;p&gt;Now off to learning! Excited to get into it. Will keep updating the blog with what I’ve learned during the process. Cheers!&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">I love learning and talking about programming languages. Mostly enjoy a different way of thinking that comes with it. Bring up Haskell? We’ll talk about Monads and functional programming. Clojure? Let’s talk about transducers. Bringing up Go? Let’s talk about go routines, concurrency and striving for simplicity.</summary></entry><entry><title type="html">New Year Goals. A Reflection.</title><link href="http://localhost:4000/refelction/goals/2020/01/01/new-year-goals-a-reflection.html" rel="alternate" type="text/html" title="New Year Goals. A Reflection." /><published>2020-01-01T14:11:17-08:00</published><updated>2020-01-01T14:11:17-08:00</updated><id>http://localhost:4000/refelction/goals/2020/01/01/new-year-goals-a-reflection</id><content type="html" xml:base="http://localhost:4000/refelction/goals/2020/01/01/new-year-goals-a-reflection.html">&lt;p&gt;2019 really had it’s ups-and-downs. It sure tested me as a living being. It was a wild year and it made me think what is REALLY important in my life; everything ranging from my own development career to friends and family. That being said, I’m glad the year is behind me and can’t wait to start 2020 with a fresh state-of-mind.&lt;/p&gt;
+
+&lt;h2 id=&quot;a-note-on-mental-health&quot;&gt;A Note on Mental Health&lt;/h2&gt;
+&lt;p&gt;I hate talking about my mental health. So this is getting talked about first. Depression and anxiety is awkward to talk about for me. I feel like I’m just complaining when I talk to about it. I’m realizing that working long hours consistently for the past 2 years have been detrimental to my well-being. I’m making it a point this year to see a therapist regularly. Sometimes you need an hour session to talk to someone who would put you in a right frame of mind.&lt;/p&gt;
+
+&lt;p&gt;I have had my days where I’ve wanted to drive off of the road. It scares me, especially when I realize the impact and what is important. Though, I feel like this happening more often which is more than concerning. This past year’s struggles have definitely caused the frequency of these thoughts.&lt;/p&gt;
+
+&lt;p&gt;However, I’m realizing that I’m not alone in the game of life. I just need to talk, take fewer side projects, be more active, etc. Everybody has good and bad days. Even some weird years. I’m also worth more than I realize. To family, friends, colleagues and even acquaintances.&lt;/p&gt;
+
+&lt;p&gt;I’m not the smartest person in the world, but I’m more intelligent than the average bear. I have skills that I’ve invested over 10 years. Even through the toughest of times, I realize the I have the best, loving wife I could ever ask for, the best family in the world (even though both sides can be dysfunctional), and the best friends. I have more support than I realize and they help me grow everyday.&lt;/p&gt;
+
+&lt;p&gt;Also, meditation. I’m getting better at meditating longer. I just need to be consistent with my sessions. I think finding a good book in this category is in order.&lt;/p&gt;
+
+&lt;p&gt;It feel weird to get this out publicly, but I’m hoping this category of the post helps someone and myself. Mental health should be talked about.&lt;/p&gt;
+
+&lt;h2 id=&quot;life-work-and-profession&quot;&gt;Life, work and profession&lt;/h2&gt;
+
+&lt;p&gt;With the mental health reflection out of the way, let’s get into the good stuff.&lt;/p&gt;
+
+&lt;p&gt;I’m a goal-oriented person and I have a lot of them. Even though I’d like to achieve them all this year, it doesn’t mean I have to get to them all. Mental and physical well-being is more important. Can’t be a great, productive developer if I’m broken. Need to be more forward if I need a break and actually notice when I need one.&lt;/p&gt;
+
+&lt;p&gt;I need to also realize why I’m working. I’m working towards my goal of being financially independent while working on projects that I’m passionate about. I don’t want to be burnt out when I’m older, I want to be able to do things without worrying about money. I’m not materialistic and I hate the concept of money. I don’t want to be rich, but I don’t want to worry about money since the world is driven by it.&lt;/p&gt;
+
+&lt;p&gt;This year, I want to take a stab at bootstrapping a small product. I like the minimalism concept and I want to build products for people who need that service. It will keep my entrepreneurial and programming mind happy, while passionately providing support to a group of customers. I have a few ideas for a Saas application, but I’m still trying to work through ideas.&lt;/p&gt;
+
+&lt;p&gt;Moving on, I want to convince my current company to be open for me to work remote more often. I am way more productive that way, I can organize my goals better, I’m independently driven and don’t need someone looking over my shoulder, and I won’t drive myself insane commuting three hours a day.&lt;/p&gt;
+
+&lt;p&gt;If I can’t achieve the above, then I need to do some soul searching and evaluate if I want to stay with my current employer. Perhaps find a company that’s pro-remote and is used to having a remote team.&lt;/p&gt;
+
+&lt;p&gt;Don’t get me wrong, I really love the company I work for. I love the colleagues that I work with. I think I’m a good fit there and I like the way things are going currently. However, that’s not a reason to sacrifice my health, my goals, etc. Maybe this the year where I take the next step grow beyond where I’m at currently.&lt;/p&gt;
+
+&lt;p&gt;Most importantly, I should focus on spending more time with family, wife and friends. I’ve been isolating myself on my computer and I need focus on good times when I’m not working. I also need to learn when to stop working.&lt;/p&gt;
+
+&lt;p&gt;Here are my goals in list form:&lt;/p&gt;
+
+&lt;h2 id=&quot;let-us-start-with-my-technical-goals&quot;&gt;Let us start with my technical goals.&lt;/h2&gt;
+&lt;p&gt;These have been my goals for awhile, but listing them so I stick to them.&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Since I tend to focus on backend development, I want to focus only on PHP and Python. Don’t overload brain using too many languages.&lt;/li&gt;
+  &lt;li&gt;Use Go as a hobby language, but don’t be afraid to use for projects.&lt;/li&gt;
+  &lt;li&gt;Be more open to using React. Master Vue.&lt;/li&gt;
+  &lt;li&gt;Be more active in open source.&lt;/li&gt;
+  &lt;li&gt;Don’t be afraid to be critical on code/commits. Always be questioning.&lt;/li&gt;
+  &lt;li&gt;Build tools for myself and community.&lt;/li&gt;
+  &lt;li&gt;Always be learning.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;entrepreneurial-goals&quot;&gt;Entrepreneurial goals&lt;/h2&gt;
+&lt;p&gt;Keep the drive alive.&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Learn to think better. Always be creating ideas.&lt;/li&gt;
+  &lt;li&gt;Learn how to speak better. Communicate ideas.&lt;/li&gt;
+  &lt;li&gt;Be open to networking. Speak to people. Be passionate.&lt;/li&gt;
+  &lt;li&gt;Empathy. Listen to people.&lt;/li&gt;
+  &lt;li&gt;If idea persists, build and release MVP of product by summer.&lt;/li&gt;
+  &lt;li&gt;Take more educated and calculated risks.&lt;/li&gt;
+  &lt;li&gt;Be specific with goals, always be revising them.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;life-and-work-goals&quot;&gt;Life and work goals.&lt;/h2&gt;
+&lt;p&gt;Work to live. Don’t live to work.&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Don’t work so hard. Find a balance. A rested programmer is a better programmer.&lt;/li&gt;
+  &lt;li&gt;Optimize/balance between work and life. Spend more time with Wife, friends and family.&lt;/li&gt;
+  &lt;li&gt;Be a better husband.&lt;/li&gt;
+  &lt;li&gt;Focus on mental and physical health.&lt;/li&gt;
+  &lt;li&gt;Don’t be afraid to tell company that I’m undervalued.&lt;/li&gt;
+  &lt;li&gt;Convince company to work more remote. I work better that way and more productive. If not, look for a better fit.&lt;/li&gt;
+  &lt;li&gt;Work towards a salary based on my worth. Always know my worth.&lt;/li&gt;
+  &lt;li&gt;Take breaks. Spend more time outside. Travel more. Take more time off if needed. Mental health and well-being is more important than a job.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h2&gt;
+&lt;p&gt;This post has been on my mind for the past couple of months. I’ve been thinking about life and goals a lot. I feel like this post was needed for the blog. It’s always to take a step back from work and to evaluate the path I am taking. Good to audit it frequently. Anyway, I hope everyone had a good new year and I wish everyone a better, healthy year.&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">2019 really had it’s ups-and-downs. It sure tested me as a living being. It was a wild year and it made me think what is REALLY important in my life; everything ranging from my own development career to friends and family. That being said, I’m glad the year is behind me and can’t wait to start 2020 with a fresh state-of-mind.</summary></entry><entry><title type="html">Slack Bot Idea: Working with Some Data with Python</title><link href="http://localhost:4000/software/engineering/python/2019/06/07/slack-bot-lunch-intial-data.html" rel="alternate" type="text/html" title="Slack Bot Idea: Working with Some Data with Python" /><published>2019-06-07T15:02:17-07:00</published><updated>2019-06-07T15:02:17-07:00</updated><id>http://localhost:4000/software/engineering/python/2019/06/07/slack-bot-lunch-intial-data</id><content type="html" xml:base="http://localhost:4000/software/engineering/python/2019/06/07/slack-bot-lunch-intial-data.html">&lt;p&gt;A lot of times at the office around lunch time, one of us will ask everyone what their lunch plans are via Slack. This leads to one or a couple of us to take in orders and go pick up lunch a group of co-workers.  I’ve been interested in building bots, particularly Slack bots lately, and I felt this would be a perfect case to build one for this task.&lt;/p&gt;
+
+&lt;h2 id=&quot;need-some-data-to-work-with&quot;&gt;Need Some Data to Work With&lt;/h2&gt;
+&lt;p&gt;I’ve built a Slack bot before using Go, so know how the Slack API mostly works. However, before I get to the Slack API, I want to have some Geo data to work with. I could just have the “lunch organizer” create a list of places nearby the office and store them in a DB, but that’s boring. ;)&lt;/p&gt;
+
+&lt;p&gt;I want to actually detect places nearby the office when a lunch organizer actually searches for a place nearby the office. Perhaps a new place opened up recently and I would want that to be an option. Maybe this data could be useful for another idea, such as: Calculating distance from the office to location, how many times we’ve ordered from a particular location in a month, tracking approximate order completion time, etc.&lt;/p&gt;
+
+&lt;p&gt;How will I actually get this data from? Well, I thought of the Google Maps API, however, I didn’t really want to deal with their API. I searched around for other third-party services and found &lt;a href=&quot;https://www.mapbox.com/&quot;&gt;MapBox&lt;/a&gt; (totally not affiliated with them in any way, I just think their API is awesome to work with). They do have a Python API client, so I decided to play around with that.&lt;/p&gt;
+
+&lt;p&gt;After some thought, I really don’t want to keep hitting the API with requests constantly, since I’m pretty sure it is rate limited. So I thought of writing a Python script that will make request(s) via a CLI command, then output that data into a JSON file.&lt;/p&gt;
+
+&lt;h2 id=&quot;description-of-the-python-script&quot;&gt;Description of the Python Script&lt;/h2&gt;
+&lt;p&gt;Now let’s get out hands dirty! First in my &lt;code class=&quot;highlighter-rouge&quot;&gt;geo.py&lt;/code&gt; script, I want to define a variable that contains our current project path in addition with a &lt;code class=&quot;highlighter-rouge&quot;&gt;/tmp&lt;/code&gt; directory. This is where our outputted JSON files will live.  I also want to get the instance of the Geocoder class that the &lt;a href=&quot;https://github.com/mapbox/mapbox-sdk-py&quot;&gt;MapBox Python API&lt;/a&gt; client provides.&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;mapbox&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Geocoder&lt;/span&gt;
+
+ &lt;span class=&quot;n&quot;&gt;dir_path&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;os&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;path&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dirname&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;os&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;path&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;realpath&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;__file__&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'/tmp'&lt;/span&gt;
+ 
+ &lt;span class=&quot;n&quot;&gt;geocoder&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Geocoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;access_token&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;os&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;getenv&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'MAPBOX_TOKEN'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Next, I want to able to query the &lt;a href=&quot;https://docs.mapbox.com/api/search/&quot;&gt;Search API&lt;/a&gt; based on a list of search terms. I’m thinking of loading a &lt;code class=&quot;highlighter-rouge&quot;&gt;csv&lt;/code&gt; file that contains a list of terms such as tacos, Taco Bell, greek food, etc. that is separated by a comma delimiter.&lt;/p&gt;
+
+&lt;p&gt;This can be it’s own function called &lt;code class=&quot;highlighter-rouge&quot;&gt;load_terms()&lt;/code&gt;&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# ... other imports 
+&lt;/span&gt;&lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;csv&lt;/span&gt;
+
+ &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;load_terms&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;():&lt;/span&gt;
+     &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+     grab terms from a csv file and return data
+     &quot;&quot;&quot;&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;terms&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[]&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;with&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;open&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'terms.csv'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;newline&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;''&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;as&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;csvfile&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+         &lt;span class=&quot;n&quot;&gt;termreader&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;csv&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;reader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;csvfile&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;delimiter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;','&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+         &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;term&lt;/span&gt; &lt;span class=&quot;ow&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;termreader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+             &lt;span class=&quot;n&quot;&gt;terms&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;append&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;term&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;terms&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Here’s an example  &lt;code class=&quot;highlighter-rouge&quot;&gt;terms.csv&lt;/code&gt;  file:&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-csv&quot;&gt; taco bell,fast food,mcdonalds,greek,greek food,tacos,mexican,mexican food
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;I want a separate function that will actually make a request to the API and return JSON output.&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt; &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;query_geocoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;q&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;query&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;f'&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;q&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;s&quot;&gt; Fresno, CA 93727'&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;response&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;geocoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;forward&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;query&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;types&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'poi'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'postcode'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;limit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;10&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;json&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dumps&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;response&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;geojson&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;())&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;This grabs a &lt;code class=&quot;highlighter-rouge&quot;&gt;q&lt;/code&gt; parameter which represents a query/term. Then we are making use of &lt;a href=&quot;https://realpython.com/python-f-strings/&quot;&gt;Python 3’s f-Strings&lt;/a&gt; in the query variable which we are adding it to our office city and postal code. Then we are taking our query and passing it to &lt;code class=&quot;highlighter-rouge&quot;&gt;gecoder.forward()&lt;/code&gt; which will make a request to the MapBox search API. Then we are returning the JSON result.&lt;/p&gt;
+
+&lt;p&gt;Now on to the function that generates the geocode data and outputs it into JSON files.&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt; &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;generate_geodata&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;():&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;terms&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;load_terms&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+ 
+     &lt;span class=&quot;c1&quot;&gt;# make directory for data files to live per generate task
+&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;now&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;datetime&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;now&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;os&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;mkdir&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dir_path&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'/'&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;now&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;strftime&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'%m_%d_%Y_%s'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;dest&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dir_path&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'/'&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;now&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;strftime&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'%m_%d_%Y_%s'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;term&lt;/span&gt; &lt;span class=&quot;ow&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;terms&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]:&lt;/span&gt;
+         &lt;span class=&quot;n&quot;&gt;filename&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;time&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;())&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'_'&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt;  &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;term&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'_geodata.json'&lt;/span&gt;
+         &lt;span class=&quot;k&quot;&gt;with&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;open&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;os&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;path&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;join&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dest&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;filename&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;),&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'w'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;as&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;f&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+             &lt;span class=&quot;n&quot;&gt;f&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;write&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;query_geocoder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;term&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+             &lt;span class=&quot;n&quot;&gt;f&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;close&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;First, I’m calling the &lt;code class=&quot;highlighter-rouge&quot;&gt;load_terms&lt;/code&gt; function to a get a list of our terms.  I wanted to make a directory within the &lt;code class=&quot;highlighter-rouge&quot;&gt;tmp&lt;/code&gt; directory that is generated when the command is called. This will be based on the current date and unix timestamp. Then we loop through the terms list and create a new JSON file for each term. Then, I called the &lt;code class=&quot;highlighter-rouge&quot;&gt;query_geocoder&lt;/code&gt; function within the loop which writes to that file.&lt;/p&gt;
+
+&lt;p&gt;As I mentioned above, I want the data to be generated via a command, so I used &lt;a href=&quot;https://docs.python.org/3/library/argparse.html&quot;&gt;Python’s argparse&lt;/a&gt; to start creating a CLI.&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt; &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;__name__&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'__main__'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+     &lt;span class=&quot;c1&quot;&gt;# geo CLI
+&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;parser&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;argparse&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ArgumentParser&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;description&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;CLI for generating geo data&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;parser&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;add_argument&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'-g'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'--generate'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'store_true'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;help&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'generates geo data'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+     &lt;span class=&quot;n&quot;&gt;args&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;parser&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;parse_args&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;args&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;generate&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+         &lt;span class=&quot;k&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'data is generating... &lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+         &lt;span class=&quot;n&quot;&gt;generate_geodata&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+         &lt;span class=&quot;k&quot;&gt;print&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'Done!'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+ 
+     &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;len&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sys&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;argv&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+         &lt;span class=&quot;n&quot;&gt;parser&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;print_help&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+         &lt;span class=&quot;n&quot;&gt;sys&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;exit&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;When we use the &lt;code class=&quot;highlighter-rouge&quot;&gt;python geo.py -g&lt;/code&gt;  command (or &lt;code class=&quot;highlighter-rouge&quot;&gt;--generate&lt;/code&gt;), it will query the API and generate JSON files in a new directory within our &lt;code class=&quot;highlighter-rouge&quot;&gt;/tmp&lt;/code&gt; directory.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-to-do-from-here&quot;&gt;What To Do From Here?&lt;/h2&gt;
+&lt;p&gt;This is a very easy, quick and dirty script at them moment. However, I’m thinking of expanding the program to parse and store the geo data into a database. Perhaps we can detect if there’s a new location nearby and store it in the DB. We could use a scheduler or a cron job that runs the command and check weekly, monthly, etc.&lt;/p&gt;
+
+&lt;p&gt;Once that’s done, we can create an admin that lists nearby locations to choose from, store recent locations, play around with the geo data with a tool such as &lt;a href=&quot;https://postgis.net/&quot;&gt;PostGIS&lt;/a&gt;, etc. After, we should have a foundation to start on Slack related things.&lt;/p&gt;
+
+&lt;p&gt;In the next couple articles, I will go over what I’ve built based on the tasks above. Stay tuned!&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">A lot of times at the office around lunch time, one of us will ask everyone what their lunch plans are via Slack. This leads to one or a couple of us to take in orders and go pick up lunch a group of co-workers. I’ve been interested in building bots, particularly Slack bots lately, and I felt this would be a perfect case to build one for this task.</summary></entry><entry><title type="html">My “A-ha” Moment with Go - Understanding the Interface</title><link href="http://localhost:4000/software/engineering/go/2019/01/29/my-aha-moment-with-go.html" rel="alternate" type="text/html" title="My “A-ha” Moment with Go - Understanding the Interface" /><published>2019-01-29T14:56:17-08:00</published><updated>2019-01-29T14:56:17-08:00</updated><id>http://localhost:4000/software/engineering/go/2019/01/29/my-aha-moment-with-go</id><content type="html" xml:base="http://localhost:4000/software/engineering/go/2019/01/29/my-aha-moment-with-go.html">&lt;p&gt;I’ve been using and toying with Go for almost two years now. At the time I decided to learn the language, I was curious on what this language had to offer.&lt;/p&gt;
+
+&lt;p&gt;Initially, I was really intrigued by it’s simplicity. Loved that it was minimal and easy to pick up. I learned the basics of the language in only a couple of hours and loved writing programs in it. I began to think, “where has this language been all of my life? Why am I just barley learning this language?” It quickly became my favorite language to use, but as I began to dig deeper, there were definitely frustrations that came along with it.&lt;/p&gt;
+
+&lt;p&gt;Here has been my process for learning Go so far:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;OMG! I love this language! Where has this been all my life?&lt;/li&gt;
+  &lt;li&gt;Why do we have to code this way? Why do we have to check if an error is nil. What’s the point of interfaces?! I’m going back to JavaScript, Python or PHP!!&lt;/li&gt;
+  &lt;li&gt;I think I get his now. Go is fun again.&lt;/li&gt;
+  &lt;li&gt;I’m lost again. Not sure Go is for me. Losing all hope.&lt;/li&gt;
+  &lt;li&gt;A-ha!!! I get it now  that’s why it was designed this why. That’s awesome! Everything makes sense. Go is my favorite again.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Here’s some of the things I struggled with as a young Gopher:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;What’s the point of interfaces?&lt;/li&gt;
+  &lt;li&gt;Pointers (I don’t come from a C background, so they were/are new to me)&lt;/li&gt;
+  &lt;li&gt;Returning multiple values is cool, but why even return errors? Why can’t you do this within your functions?&lt;/li&gt;
+  &lt;li&gt;Slices and slice manipulation were weird to me at first coming from a JS/PHP background where I was used to arrays from those languages.&lt;/li&gt;
+  &lt;li&gt;Minimalism is cool and all, but I was kind of frustrated with the common phrase “just use the standard library for everything” that was said throughout the community. I believe in this, but I don’t feel like you need to write everything from scratch (ex. database migrations as an example).&lt;/li&gt;
+  &lt;li&gt;Go routines  are still a new topic for me. They are super cool rabbit-holed concept to get into.&lt;/li&gt;
+  &lt;li&gt;Etc.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;interfaces&quot;&gt;Interfaces&lt;/h2&gt;
+&lt;p&gt;I’m going to be mainly discussing interfaces in this post, because understanding interfaces initiated my “a-ha” moment with Go. Understanding this part of the language actually made me fall in love with it. As a side note, I feel like finally understanding something is what drives me as a programmer and makes me love what I’m doing. I don’t mind the frustrations that come along.&lt;/p&gt;
+
+&lt;h3 id=&quot;what-is-an-interface&quot;&gt;What is an Interface?&lt;/h3&gt;
+
+&lt;p&gt;In my own words, interfaces are a collection in method definitions. Let me explain what I mean.&lt;/p&gt;
+
+&lt;p&gt;In a language such as Java or PHP, you explicitly define the methods/types that are used when a class implements it. In PHP, when a class implements an interface, that class has to use those methods. For example:&lt;/p&gt;
+
+&lt;div class=&quot;language-php highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;cp&quot;&gt;&amp;lt;?php&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;// ExampleInterface.php&lt;/span&gt;
+
+&lt;span class=&quot;kd&quot;&gt;interface&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;ExampleInterface&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;nx&quot;&gt;recordList&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;();&lt;/span&gt;
+	&lt;span class=&quot;nx&quot;&gt;getRecord&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+
+&lt;span class=&quot;o&quot;&gt;&amp;lt;?&lt;/span&gt;&lt;span class=&quot;nx&quot;&gt;php&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;// Example.php&lt;/span&gt;
+
+&lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Example&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;implements&lt;/span&gt; &lt;span class=&quot;nx&quot;&gt;ExampleInterface&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;recordList&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; 
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+		&lt;span class=&quot;c1&quot;&gt;// ...&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;k&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;getRecord&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nv&quot;&gt;$id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+		&lt;span class=&quot;c1&quot;&gt;// ...&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;There are few key differences with interfaces in Go. In Go, interfaces are implemented implicitly. Meaning you don’t have to directly implement an interface to satisfy the methods within it. Only the necessary types and input/output.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://tour.golang.org/methods/10&quot;&gt;From the Golang tour&lt;/a&gt;: &lt;em&gt;”Implicit interfaces decouple the definition of an interface from its implementation, which could then appear in any package without prearrangement.”&lt;/em&gt;&lt;/p&gt;
+
+&lt;h2 id=&quot;example-time&quot;&gt;Example time&lt;/h2&gt;
+&lt;p&gt;For example, let’s say I have a “watcher” which watches things. In it’s definition it has a &lt;code class=&quot;highlighter-rouge&quot;&gt;Watch() bool&lt;/code&gt; function that returns a boolean. I also have a couple of structs, Task and Meeting.&lt;/p&gt;
+
+&lt;div class=&quot;language-go highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;type&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Watcher&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;interface&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;n&quot;&gt;Watch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;bool&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;type&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Task&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;struct&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;string&lt;/span&gt;
+	&lt;span class=&quot;n&quot;&gt;complete&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;bool&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;type&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Meeting&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;struct&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;string&lt;/span&gt;
+	&lt;span class=&quot;n&quot;&gt;complete&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;bool&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Then, we can create functions that implement this interface:&lt;/p&gt;
+
+&lt;div class=&quot;language-go highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;t&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Task&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Watch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;bool&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;true&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;m&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Meeting&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Watch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;bool&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;false&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Now every time use those structs we can call the &lt;code class=&quot;highlighter-rouge&quot;&gt;Watch&lt;/code&gt; method.&lt;/p&gt;
+
+&lt;div class=&quot;language-go highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;t&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Task&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;Todo&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;complete&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;true&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;m&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Meeting&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;name&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;meeting with the bobs&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;complete&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;false&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;t&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Watch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;c&quot;&gt;// true&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;m&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Watch&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;c&quot;&gt;// false&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;This allows our code to be polymorphic and we don’t have to re-write logic for a watcher every time we need to use it.&lt;/p&gt;
+
+&lt;p&gt;A good example of interfaces is in &lt;a href=&quot;https://golang.org/pkg/io/&quot;&gt;Go’s &lt;code class=&quot;highlighter-rouge&quot;&gt;io&lt;/code&gt; package&lt;/a&gt;.  Let’s take a look at &lt;code class=&quot;highlighter-rouge&quot;&gt;io.Reader&lt;/code&gt;&lt;/p&gt;
+
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;type Reader interface {
+        Read(p []byte) (n int, err error)
+}
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;You can actually use an interface as argument in a function, extending it’s use. For example, you can write a custom function for limiting the amount of bytes passed in.&lt;/p&gt;
+
+&lt;div class=&quot;language-go highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;CustomLimiter&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;r&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;io&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Reader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Reader&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;c&quot;&gt;// some limiter logic that returns a reader&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt; 
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Actually, the io package already has this (called &lt;code class=&quot;highlighter-rouge&quot;&gt;LimitReader&lt;/code&gt;), but I’m just using the above as an example to visualize the power of interfaces.&lt;/p&gt;
+
+&lt;div class=&quot;language-go highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c&quot;&gt;// LimitReader returns a Reader that reads from r&lt;/span&gt;
+&lt;span class=&quot;c&quot;&gt;// but stops with EOF after n bytes.&lt;/span&gt;
+&lt;span class=&quot;c&quot;&gt;// The underlying implementation is a *LimitedReader.&lt;/span&gt;
+&lt;span class=&quot;k&quot;&gt;func&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;LimitReader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;r&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Reader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Reader&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;LimitedReader&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;r&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Reading code from Go’s standard library is awe inspiring. After looking through this I realized the power that interfaces have. Are they needed all of the time? No. However, as your application or program grows, they are a powerful tool to keep your code clean and maintainable. Also, if you’re building a package, they may be necessary so that users of your package can extend the behavior of your code.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-empty-interface&quot;&gt;The Empty Interface&lt;/h2&gt;
+&lt;p&gt;Ah! The good ‘ole empty &lt;code class=&quot;highlighter-rouge&quot;&gt;interface{}&lt;/code&gt; . An empty interface are used to handle values of an unknown type. Moreover, they may hold values of any type. I find them extremely useful when I’m accepting parameter in a function and I’m unaware of the type that is going to be passed in.&lt;/p&gt;
+
+&lt;p&gt;Although, I would caution to not overuse an empty interface as the compiler won’t be able to check for the type the value holds.&lt;/p&gt;
+
+&lt;h2 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h2&gt;
+&lt;p&gt;Once I’ve had this “light build” moment, I’m completely sold on Go now. It’s pretty much turned into my favorite language. Although, there were some frustrating learning curves, I will say that once you understand Go, you’ll end up loving it.&lt;/p&gt;
+
+&lt;p&gt;Here are some resources on interfaces:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Francesc Campoy’s talk  -&lt;/li&gt;
+&lt;/ul&gt;
+&lt;iframe width=&quot;560&quot; height=&quot;315&quot; src=&quot;https://www.youtube.com/embed/F4wUrj6pmSI&quot; frameborder=&quot;0&quot; allow=&quot;accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture&quot; allowfullscreen=&quot;&quot;&gt;&lt;/iframe&gt;
+&lt;ul&gt;
+  &lt;li&gt;Jon Calhoun’s blog post on Interfaces - &lt;a href=&quot;https://www.calhoun.io/how-do-interfaces-work-in-go/&quot;&gt;https://www.calhoun.io/how-do-interfaces-work-in-go/&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;And of course, Go’s documentation - &lt;a href=&quot;https://tour.golang.org/methods/9&quot;&gt;A Tour of Go&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;</content><author><name>Tyler Souza</name></author><summary type="html">I’ve been using and toying with Go for almost two years now. At the time I decided to learn the language, I was curious on what this language had to offer.</summary></entry><entry><title type="html">Some Philosophies on Separating Your Stack</title><link href="http://localhost:4000/ramblings/software/engineering/2018/11/06/some-thoughts-on-separating-tech-stack.html" rel="alternate" type="text/html" title="Some Philosophies on Separating Your Stack" /><published>2018-11-06T09:45:17-08:00</published><updated>2018-11-06T09:45:17-08:00</updated><id>http://localhost:4000/ramblings/software/engineering/2018/11/06/some-thoughts-on-separating-tech-stack</id><content type="html" xml:base="http://localhost:4000/ramblings/software/engineering/2018/11/06/some-thoughts-on-separating-tech-stack.html">&lt;p&gt;For web applications, it’s a common pattern to separate your backend (typically a REST API) from your front-end/user interface nowadays. It’s a practice that I’ve been using for all of my projects for the past year or so.&lt;/p&gt;
+
+&lt;p&gt;I think this is a good idea for a number of reasons:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;Decouples your backend from your user interface.&lt;/li&gt;
+  &lt;li&gt;Multiple parties can access your backend data, such as, a mobile application, desktop application, other user’s who want to access your API, etc.&lt;/li&gt;
+  &lt;li&gt;Each end of the stack has it’s own responsibility. The front-end can focus on user-interface related things and the backend can focus on the data side of things.&lt;/li&gt;
+  &lt;li&gt;If you have a dedicated front-end and/or backend team,  you have two different repos in which those teams can dedicated the efforts towards.&lt;/li&gt;
+  &lt;li&gt;Reduces mixing configuration for both frontend and backend purposes.&lt;/li&gt;
+  &lt;li&gt;Many more to list.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;however&quot;&gt;However…&lt;/h2&gt;
+&lt;p&gt;However, there is nothing wrong with keeping the traditional monolith and having your frontend and backend within the same project. It really depends on your use case. If you are absolutely sure that you’re only going to be building a web application, then doing it the “traditional” way is perfectly fine. It could be easier and less costly to have the both ends of the stack within the same project and server.&lt;/p&gt;
+
+&lt;p&gt;Though, I still choose to separate the backend/frontend has my default because I don’t know what I’ll need in the future. Maybe I’ll need a mobile application to talk to my backend. Also, I don’t know what problems I’ll come across. Maybe I’ll need to scale? Maybe I’ll need different parties to access my data? Also, I just like the idea of separation itself. It just feels right. Reduces brain clutter for me. You can focus on one area at-a time.&lt;/p&gt;
+
+&lt;h2 id=&quot;ways-to-separate-your-stack&quot;&gt;Ways to separate your stack&lt;/h2&gt;
+
+&lt;p&gt;There are two common ways I’ve seen two stacks separated:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;Have both projects be on different repos but on the same server, just in different directories and different ports. This can be done with and &lt;a href=&quot;https://linode.com/docs/web-servers/nginx/use-nginx-reverse-proxy/&quot;&gt;Nginx reverse proxy server&lt;/a&gt;.&lt;/li&gt;
+  &lt;li&gt;Or you can just have each end be on different servers.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;the-nginx-proxy-way&quot;&gt;The Nginx Proxy Way&lt;/h2&gt;
+&lt;p&gt;You could have your backend on the same server/domain and direct that traffic to that port using an &lt;a href=&quot;https://linode.com/docs/web-servers/nginx/use-nginx-reverse-proxy/&quot;&gt;nginx reverse proxy&lt;/a&gt;. Here’s an example:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;location /api/ {
+  proxy_pass http://localhost:5000;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection 'upgrade';
+  proxy_set_header Host $host;
+  proxy_cache_bypass $http_upgrade;
+}
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;If user’s hit &lt;code class=&quot;highlighter-rouge&quot;&gt;localhost:5000/api&lt;/code&gt;, then it will direct to user to the backend server. Then you can configure your frontend  as you need to.&lt;/p&gt;
+
+&lt;h2 id=&quot;the-different-server-way&quot;&gt;The Different Server Way&lt;/h2&gt;
+&lt;p&gt;I’d recommend going this route. Much easier to balance the load and scale your apps if both ends are running on a different server. Though, keep-in-mind that you may run into CORS issues, but that should be a simple issue to fix. You should also make sure you don’t allow all hosts to access your API in production.  Anyway, there are a number of services to choose from. DigitalOcean, Linode, AWS, Heroku, etc. just to name a few.&lt;/p&gt;
+
+&lt;h2 id=&quot;my-technology-of-choice&quot;&gt;My Technology of Choice&lt;/h2&gt;
+&lt;p&gt;I usually default to a &lt;a href=&quot;https://nodejs.org/en/&quot;&gt;Node.js&lt;/a&gt; (express) backend with &lt;a href=&quot;https://vuejs.org/&quot;&gt;Vue&lt;/a&gt; as my front-end. I use the &lt;a href=&quot;https://github.com/vuejs/vue-cli&quot;&gt;Vue-CLI&lt;/a&gt; to quickly spin up a new front-end project.&lt;/p&gt;
+
+&lt;p&gt;I also typically use &lt;a href=&quot;https://laravel.com/&quot;&gt;Laravel&lt;/a&gt; as my API backend sometimes. I don’t go straight to &lt;a href=&quot;https://lumen.laravel.com/&quot;&gt;Lumen&lt;/a&gt; unless speed is a concern. I usually keep everything, especially blade templates in case I need them. Just a suggestion, but you could use Laravel’s front end stuff for API docs, admin settings, &lt;a href=&quot;https://swagger.io/&quot;&gt;Swagger&lt;/a&gt; for API docs, etc.&lt;/p&gt;
+
+&lt;p&gt;However, it typically doesn’t matter what stack I’m in. I can work with &lt;a href=&quot;https://golang.org/&quot;&gt;Go&lt;/a&gt; or &lt;a href=&quot;https://www.djangoproject.com/&quot;&gt;Django/Python&lt;/a&gt; backend. I can hang out with &lt;a href=&quot;https://reactjs.org/&quot;&gt;React&lt;/a&gt;, &lt;a href=&quot;https://angular.io/&quot;&gt;Angular&lt;/a&gt; and friends. I just stick to the overall concept.&lt;/p&gt;
+
+&lt;h2 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h2&gt;
+&lt;p&gt;I personally think that separating your stack is a smart idea. It just makes sense to me. For scalability reasons, for development reasons, etc. I think it’s a great pattern to follow for most use-cases. Though, it may not fit every use-case. Which brings me to my last point, at the end-of-the-day, it really depends on the cards you’re handed with and the problem you are trying to solve.&lt;/p&gt;
+
+&lt;p&gt;&lt;em&gt;I don’t have a comment section. However you can come chat with me on &lt;a href=&quot;https://twitter.com/tysweezy&quot;&gt;Twitter&lt;/a&gt;!&lt;/em&gt;&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">For web applications, it’s a common pattern to separate your backend (typically a REST API) from your front-end/user interface nowadays. It’s a practice that I’ve been using for all of my projects for the past year or so.</summary></entry><entry><title type="html">Part 1: Wavvy, My Open Source Project Idea. Providing REST API Helpers and Syntactic Sugar</title><link href="http://localhost:4000/python/opensource/api/2018/08/08/wavvy-api-tools.html" rel="alternate" type="text/html" title="Part 1: Wavvy, My Open Source Project Idea. Providing REST API Helpers and Syntactic Sugar" /><published>2018-08-08T17:55:17-07:00</published><updated>2018-08-08T17:55:17-07:00</updated><id>http://localhost:4000/python/opensource/api/2018/08/08/wavvy-api-tools</id><content type="html" xml:base="http://localhost:4000/python/opensource/api/2018/08/08/wavvy-api-tools.html">&lt;p&gt;I’ve decided to start an open source project and fill another repository on my GitHub. Since I’ve been working more on the backend side and building services/REST APIs, I’ve had an urge to dedicate myself in this area. I thought it would a wonderful area to provide tooling for REST API development in Python.&lt;/p&gt;
+
+&lt;h1 id=&quot;the-concept&quot;&gt;The Concept&lt;/h1&gt;
+
+&lt;p&gt;I thought be interesting to create a framework agnostic library that provides helper methods/classes for handling data, particularly handling Python dictionary data and encoding/decoding JSON data in an elegant way.&lt;/p&gt;
+
+&lt;p&gt;At the base level, I wanted the library to have two classes:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;Transform  –&amp;gt; a helper for formatting a json schema(s).&lt;/li&gt;
+  &lt;li&gt;Collection –&amp;gt; a helper for handling python dictionary collections.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Perhaps I can combine these into one class and handle a dictionary collection and json schema format.&lt;/p&gt;
+
+&lt;h3 id=&quot;implementation-idea&quot;&gt;Implementation Idea&lt;/h3&gt;
+
+&lt;p&gt;Here’s a basic example of how I would like this libary to work:&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;wavvy.transformer&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Transform&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;data&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Transform&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;some_dict&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;'name'&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;some_dict&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'name'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;'key'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;some_dict&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;'key'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;].&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;lower&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(),&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;'links'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;'google'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'https://google.com'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;'twitter'&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;'https://twitter.com'&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;})&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;A really basic example. Maybe the API could be named better. The Transform class could be named TransformJSON. Or! The &lt;code class=&quot;highlighter-rouge&quot;&gt;Transform&lt;/code&gt; class could have methods that handle different types of schema types, such as XML.&lt;/p&gt;
+
+&lt;h1 id=&quot;purpose&quot;&gt;Purpose&lt;/h1&gt;
+
+&lt;p&gt;For fun and learing mainly. Plus it would be nice to use tools that I’ve personally built in the wild. Also, I find the &lt;code class=&quot;highlighter-rouge&quot;&gt;json.loads()&lt;/code&gt; and &lt;code class=&quot;highlighter-rouge&quot;&gt;json.dumps()&lt;/code&gt; methods in Python’s default &lt;code class=&quot;highlighter-rouge&quot;&gt;json&lt;/code&gt; module to be named oddly, and it would be nice to have some syntactic sugar/wrappers around them.&lt;/p&gt;
+
+&lt;h1 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h1&gt;
+
+&lt;p&gt;Wanted to write about this project as a start it and will provide updates as I go along. I’m thinking of writing a post about this project when a milestone is reached or an idea has come up. You can follow the project on &lt;a href=&quot;https://github.com/tysweezy/wavvy&quot;&gt;Github&lt;/a&gt;&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">I’ve decided to start an open source project and fill another repository on my GitHub. Since I’ve been working more on the backend side and building services/REST APIs, I’ve had an urge to dedicate myself in this area. I thought it would a wonderful area to provide tooling for REST API development in Python.</summary></entry><entry><title type="html">Pondering About My Main Backend Techstack of Choice</title><link href="http://localhost:4000/javascript/techstack/2018/07/07/pondering-techstack.html" rel="alternate" type="text/html" title="Pondering About My Main Backend Techstack of Choice" /><published>2018-07-07T22:55:17-07:00</published><updated>2018-07-07T22:55:17-07:00</updated><id>http://localhost:4000/javascript/techstack/2018/07/07/pondering-techstack</id><content type="html" xml:base="http://localhost:4000/javascript/techstack/2018/07/07/pondering-techstack.html">&lt;p&gt;For about eight months or so, I decided to commit myself and focus on Node.js as my main backend techstack of choice. PHP/Laravel have treated me well and I’ve been loving Go, but I wanted to focus on one tech stack, which is now Node as my main go-to. There’s just something about Javascript that I can’t get away from. Maybe it’s the new features coming out, it’s functional programming nature and it’s flexibility. Who knows.&lt;/p&gt;
+
+&lt;h2 id=&quot;reflection&quot;&gt;Reflection&lt;/h2&gt;
+
+&lt;p&gt;I’ve been pretty happy with my choice to stick to Node as my primary stack. I mainly try to stick to Postgres as my database, express as my web framework of choice, etc. I tend to take the Go philosophy with me when I start a new project. I start very basic and small depending on my needs, then I work my way up as I go along. I find Node/Express to be very nice for this.&lt;/p&gt;
+
+&lt;h2 id=&quot;some-thoughts-on-typescript&quot;&gt;Some Thoughts on TypeScript&lt;/h2&gt;
+
+&lt;p&gt;TypeScript is a superset of JavaScript. You can think of it as “JavaScript with types.” I’ve been using for a current project that I’m working on and it has been a joy to work with. You can transfer your existing Node application from JS to TypeScript by just changing to file extension from “.js” to “.ts.” (&lt;a href=&quot;https://www.typescriptlang.org/docs/handbook/migrating-from-javascript.html&quot;&gt;Check out migrating from JavaScript&lt;/a&gt;) You can refactor as you need to and organize your application’s architecture as it grows.&lt;/p&gt;
+
+&lt;p&gt;For the database end-of-things, I’ve been using an ORM called &lt;a href=&quot;http://typeorm.io/&quot;&gt;Typeorm&lt;/a&gt;. It seems to be quite new, however, a really solid ORM. It’s very similar to &lt;a href=&quot;https://docs.djangoproject.com/en/2.0/topics/db/&quot;&gt;Django’s ORM&lt;/a&gt;, &lt;a href=&quot;https://www.sqlalchemy.org/&quot;&gt;SQLAlchemy&lt;/a&gt; and Laravel’s Eloquent. In fact, it does support both the Active Record pattern and the Data Mapper pattern. Really neat since I haven’t found an ORM I’ve liked when developing in Node.&lt;/p&gt;
+
+&lt;h2 id=&quot;and-then-theres-python-and-django&quot;&gt;And Then There’s Python and Django&lt;/h2&gt;
+
+&lt;p&gt;I really love Python! I really do! It was my first language that I’ve fully dove into and understood. &lt;a href=&quot;https://www.bixly.com/&quot;&gt;The dev shop I currently work at&lt;/a&gt; primarily specializes in Django development and I’ve used it quite a bit over here. I love it (Did I mention that?)! As far as Django, I love using it for rapid prototyping and the Django Rest Framework is really solid. Since I’m a REST API development junky, it’s one of my favorite tools. I do want to make reusable Python/Django open source packages in the near future, just depends on needs and use-cases around a particular problem. I think I’ll keep coming back to Python as one of my main languages, and that’s just fine. :)&lt;/p&gt;
+
+&lt;h2 id=&quot;closing-thoughts&quot;&gt;Closing Thoughts&lt;/h2&gt;
+
+&lt;p&gt;It’s kind of hard to decide which tech stack I want to choose as my main. Maybe it’s better to master both? Perhaps focus on mastering backend development instead of a particular stack? Perhaps switching between Node and Python is a good thing while playing around with Go on the side! Though which technologies I invest my time in has been on my mind a lot lately. What are your thoughts?&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">For about eight months or so, I decided to commit myself and focus on Node.js as my main backend techstack of choice. PHP/Laravel have treated me well and I’ve been loving Go, but I wanted to focus on one tech stack, which is now Node as my main go-to. There’s just something about Javascript that I can’t get away from. Maybe it’s the new features coming out, it’s functional programming nature and it’s flexibility. Who knows.</summary></entry><entry><title type="html">Quick Thoughts on Test-Driven Development and Design Patterns</title><link href="http://localhost:4000/tdd/rant/2015/12/10/thoughts-on-tdd.html" rel="alternate" type="text/html" title="Quick Thoughts on Test-Driven Development and Design Patterns" /><published>2015-12-10T21:55:17-08:00</published><updated>2015-12-10T21:55:17-08:00</updated><id>http://localhost:4000/tdd/rant/2015/12/10/thoughts-on-tdd</id><content type="html" xml:base="http://localhost:4000/tdd/rant/2015/12/10/thoughts-on-tdd.html">&lt;p&gt;As a developer, a lot of times I feel constantly worried that I’m doing the “wrong thing” when I’m writing code. I worry if I’m doing “x” correctly, while I’m trying to focus on “y” thing. This mostly occurs for me when terms such as “&lt;a href=&quot;https://en.wikipedia.org/wiki/Test-driven_development&quot;&gt;test-driven development&lt;/a&gt;” and “&lt;a href=&quot;https://en.wikipedia.org/wiki/Software_design_pattern&quot;&gt;design patterns&lt;/a&gt;” get thrown around. I usually catch myself worrying about these topics at the wrong times; especially when I’m just trying to write something simple and get the product out here in the wild. Here are my personal thoughts and advice when approaching these topics.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://i.giphy.com/7MZ0v9KynmiSA.gif&quot; alt=&quot;enter image description here&quot; /&gt;&lt;/p&gt;
+
+&lt;h2 id=&quot;test-driven-development&quot;&gt;Test-Driven Development&lt;/h2&gt;
+
+&lt;p&gt;Before I dive in, I just want to mention that even if you don’t practice the TDD practice, you still test without even noticing it. Let’s say you’re building a site and you’re creating a form. You make a change, save, reload the browser and fill out the form to see if all works. BOOM! You just did some form of testing. Yes, you did it manually, but you still tested. TDD is more of an automated form of testing, in which, you don’t have to do the tedious task of reloading the browser every time you make a change. Note that I’m FAR from an expert in the testing world (pretty much a noob), but I know enough to kind of talk about it (I think).&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://i.giphy.com/VHHxxFAeLaYzS.gif&quot; alt=&quot;enter image description here&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;A common concern for myself and other developers is that thought, “should I be writing a test?” I think that answer kind of depends. You should ask yourself: is my app small enough to even need tests? Do I need to future proof my app? Etc. If you’re just working on a weekend throw away project, then it’s probably not necessary to write tests. However, if you’re working on a big enterprise software application, then it might be a good idea to write tests. As a matter of fact, I think &lt;a href=&quot;https://twitter.com/jeffrey_way&quot;&gt;Jeffery Way&lt;/a&gt; brought this up in the latest &lt;a href=&quot;http://searchsoftwarequality.techtarget.com/definition/unit-testing&quot;&gt;Laravel podcast&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;If you’re just purely interested in TDD and want to study it, my recommendation would be to start learning what unit testing is. Then go on to other concepts such as: functional tests, acceptance testing, etc. &lt;a href=&quot;http://searchsoftwarequality.techtarget.com/definition/unit-testing&quot;&gt;Unit testing&lt;/a&gt; is process in which you’re testing “units” or a specific feature of your application. For example, if you’re writing a trivial calculator app and want test an “add” method, you are testing that specific “add” feature or unit. It’s actually not as hard as it sounds. Write a test, run test and see if it fails, make some write some code, run tests, refactor and repeat.&lt;/p&gt;
+
+&lt;h2 id=&quot;design-patterns&quot;&gt;Design Patterns&lt;/h2&gt;
+
+&lt;p&gt;Software design patterns. There are so many of them. I’m one of those devs that loves to make clean, reusable code. I giggle with joy when I write some clean, badass code; especially when I implement a design pattern I’ve just learned. However, I fall in the “am I doing right at the right place and time?” trap. I’ve caught myself over-engineering code, wasting so much time over something really simple. It’s like writing an entire complex class when your could’ve written the same script with a couple of functions.&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://i.giphy.com/ycNkwiWl7Ralq.gif&quot; alt=&quot;enter image description here&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Just like with the TDD topic, you need to ask yourself questions: Am I going to be reusing code later on in my app? With this piece of complex functionality, am I going to be repeating myself? If you’re writing an app that only has a few database tables, a couple models and controllers, a few views, then it’s probably not necessary to implement a design pattern. If you’re writing something complex and you start to repeat yourself, it’s probably a good idea to implement a design pattern specific to your needs. Also note, if you are repeating yourself, it’s best to follow the DRY(don’t-repeat-yourself) practice.&lt;/p&gt;
+
+&lt;h2 id=&quot;closing-points&quot;&gt;Closing Points&lt;/h2&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://i.giphy.com/zrvFl1IDvy0PC.gif&quot; alt=&quot;enter image description here&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;Overall, I just wanted to share my anxiety I have when coming across these beasts. It’s not easy for a developer who is just starting out to be slammed with these topics. I’ve been doing web development for about 5 years and I feel like I’ve only scratched to surface; still feeling like a noob today. Just remember to take small steps, learn one thing at a time. In terms of developing an application, just make it work and run, then worry about refactoring when you hit an epiphany.&lt;/p&gt;
+
+&lt;p&gt;Also, speaking of TDD. If you have a chance, you all should read Kent Beck’s, &lt;em&gt;“&lt;a href=&quot;http://www.amazon.com/Test-Driven-Development-By-Example/dp/0321146530&quot;&gt;Test-Driven Development&lt;/a&gt;.”&lt;/em&gt; It’s a very good read. Definitely my rainy day book for sure.&lt;/p&gt;
+
+&lt;p&gt;Sources&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://en.wikipedia.org/wiki/Software_design_pattern&quot;&gt;https://en.wikipedia.org/wiki/Software_design_pattern&lt;/a&gt; &lt;a href=&quot;https://en.wikipedia.org/wiki/Software_design_pattern&quot;&gt;https://en.wikipedia.org/wiki/Test-driven_development&lt;/a&gt; &lt;a href=&quot;http://searchsoftwarequality.techtarget.com/definition/unit-testing&quot;&gt;http://searchsoftwarequality.techtarget.com/definition/unit-testing&lt;/a&gt; &lt;a href=&quot;http://searchsoftwarequality.techtarget.com/definition/unit-testing&quot;&gt;http://www.laravelpodcast.com/episodes/20182-episode-38-repositorybeanfactory&lt;/a&gt;&lt;/p&gt;</content><author><name>Tyler Souza</name></author><summary type="html">As a developer, a lot of times I feel constantly worried that I’m doing the “wrong thing” when I’m writing code. I worry if I’m doing “x” correctly, while I’m trying to focus on “y” thing. This mostly occurs for me when terms such as “test-driven development” and “design patterns” get thrown around. I usually catch myself worrying about these topics at the wrong times; especially when I’m just trying to write something simple and get the product out here in the wild. Here are my personal thoughts and advice when approaching these topics.</summary></entry></feed>
