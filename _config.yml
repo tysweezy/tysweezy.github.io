@@ -26,7 +26,7 @@ favicon: /assets/favicon.png
 
 # Build settings
 # theme: jekyll-theme-so-simple
-theme: no-style-please
+theme: minima
 plugins:
   - jekyll-feed
 
