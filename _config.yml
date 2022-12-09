@@ -28,6 +28,7 @@ favicon: /assets/favicon.png
 markdown: kramdown
 # theme: jekyll-theme-so-simple
 remote_theme: "mmistakes/so-simple-theme@3.2.0"
+google_analytics: "G-47J623CJLQ"
 # theme: no-style-please
 plugins:
   - jekyll-feed
