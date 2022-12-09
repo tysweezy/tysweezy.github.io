@@ -1,0 +1,97 @@
+<p>Currently, I am on a quest to build a social network for developers and using the Django REST Framework to build out the API backend. While working on the anonymous feed endpoint I came accross this in the ListView</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="w">
+</span><span class="err">//</span><span class="w"> </span><span class="err">under</span><span class="w"> </span><span class="err">a</span><span class="w"> </span><span class="err">results</span><span class="w"> </span><span class="err">object...</span><span class="w"> 
+
+
+        </span><span class="p">{</span><span class="w">
+            </span><span class="nl">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"I am a bacon person"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"user"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"post_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"original"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"created"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2022-11-17T00:42:59.237315Z"</span><span class="w">
+        </span><span class="p">}</span><span class="err">,</span><span class="w">
+
+</span></code></pre></div></div>
+
+<p>This is great, but this is not really what I want. I want to also list the user/poster details instead of just the user id. Lets get into our serializers to make this happen! You can add in another serializer as a field in the serializer that you’re using. In my case, I created a model serializer called <code class="highlighter-rouge">UserInfoSerializer</code> for listing out basic user information. I then used that serializer as a field in the <code class="highlighter-rouge">StandardPostSerilizer</code> which is a <code class="highlighter-rouge">read_only</code> field.  Here is an example:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="c1"># from accounts/serializer.py
+</span><span class="k">class</span> <span class="nc">UserInfoSerializer</span><span class="p">(</span><span class="n">serializers</span><span class="p">.</span><span class="n">ModelSerializer</span><span class="p">):</span>
+    <span class="k">class</span> <span class="nc">Meta</span><span class="p">:</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">User</span>
+        <span class="n">fields</span> <span class="o">=</span> <span class="p">(</span><span class="s">'id'</span><span class="p">,</span> <span class="s">'username'</span><span class="p">,</span> <span class="s">'email'</span><span class="p">)</span>
+
+
+<span class="c1"># the serializer class I am using
+# posts/serializer.py
+</span><span class="k">class</span> <span class="nc">StandardPostSerializer</span><span class="p">(</span><span class="n">serializers</span><span class="p">.</span><span class="n">ModelSerializer</span><span class="p">):</span>
+    <span class="n">user</span> <span class="o">=</span> <span class="n">UserInfoSerializer</span><span class="p">(</span><span class="n">read_only</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+    <span class="k">class</span> <span class="nc">Meta</span><span class="p">:</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">Post</span>
+        <span class="n">fields</span> <span class="o">=</span> <span class="p">[</span><span class="s">'content'</span><span class="p">,</span> <span class="s">'content_type'</span><span class="p">,</span> <span class="s">'user'</span><span class="p">,</span> <span class="s">'post_type'</span><span class="p">,</span> <span class="s">'created'</span><span class="p">]</span>
+
+
+<span class="c1"># my anon post feed view
+# posts/views.py
+</span><span class="k">class</span> <span class="nc">AnonFeedView</span><span class="p">(</span><span class="n">generics</span><span class="p">.</span><span class="n">ListAPIView</span><span class="p">):</span>
+    <span class="s">"""
+    public newsfeed endpoint. Any user can access this feed 
+    without a registered account.
+    """</span>
+    <span class="n">serializer_class</span> <span class="o">=</span> <span class="n">StandardPostSerializer</span>
+    <span class="n">permission_classes</span> <span class="o">=</span> <span class="p">[</span><span class="n">permissions</span><span class="p">.</span><span class="n">AllowAny</span><span class="p">]</span>
+    <span class="n">queryset</span> <span class="o">=</span> <span class="n">Post</span><span class="p">.</span><span class="n">objects</span><span class="p">.</span><span class="nb">all</span><span class="p">()</span>
+
+</code></pre></div></div>
+
+<p>Boom! I now have post results with poster (user) details attached.</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="w">
+</span><span class="err">**HTTP</span><span class="w"> </span><span class="mi">200</span><span class="w"> </span><span class="err">OK**</span><span class="w">
+</span><span class="err">**Allow:**</span><span class="w"> </span><span class="err">GET,</span><span class="w"> </span><span class="err">HEAD,</span><span class="w"> </span><span class="err">OPTIONS</span><span class="w">
+</span><span class="err">**Content-Type:**</span><span class="w"> </span><span class="err">application/json</span><span class="w">
+</span><span class="err">**Vary:**</span><span class="w"> </span><span class="err">Accept</span><span class="w">
+
+</span><span class="p">{</span><span class="w">
+    </span><span class="nl">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"next"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"previous"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"results"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w">
+        </span><span class="p">{</span><span class="w">
+            </span><span class="nl">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"I am a bacon person"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"user"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+                </span><span class="nl">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">
+                </span><span class="nl">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tyler"</span><span class="p">,</span><span class="w">
+                </span><span class="nl">"email"</span><span class="p">:</span><span class="w"> </span><span class="s2">"example@email.com"</span><span class="w">
+            </span><span class="p">},</span><span class="w">
+            </span><span class="nl">"post_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"original"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"created"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2022-11-17T00:42:59.237315Z"</span><span class="w">
+        </span><span class="p">},</span><span class="w">
+        </span><span class="p">{</span><span class="w">
+            </span><span class="nl">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"What is life my dude"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"text"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"user"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+                </span><span class="nl">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">
+                </span><span class="nl">"username"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tyler"</span><span class="p">,</span><span class="w">
+                </span><span class="nl">"email"</span><span class="p">:</span><span class="w"> </span><span class="s2">"example@email.com"</span><span class="w">
+            </span><span class="p">},</span><span class="w">
+            </span><span class="nl">"post_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"reply"</span><span class="p">,</span><span class="w">
+            </span><span class="nl">"created"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2022-11-17T06:22:21.864202Z"</span><span class="w">
+        </span><span class="p">},</span><span class="w">
+	    </span><span class="err">//</span><span class="w"> </span><span class="err">.....</span><span class="w">
+    </span><span class="p">]</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>Here are some guides –</p>
+
+<ul>
+  <li><a href="https://www.django-rest-framework.org/api-guide/fields/#custom-fields">Custom Serializer Fields</a></li>
+  <li><a href="https://corgibytes.com/blog/2022/06/14/model-relationships-django-rest-framework/">Model Relationships Django REST Framework</a></li>
+  <li><a href="https://www.django-rest-framework.org/api-guide/permissions/#allowany">AllowAny Permission Class and DRF Permission Guides</a></li>
+  <li><a href="https://www.django-rest-framework.org/api-guide/generic-views/#listapiview">ListAPIView and Other Generic Views</a></li>
+</ul>
